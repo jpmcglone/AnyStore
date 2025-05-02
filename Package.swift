@@ -1,13 +1,12 @@
-// swift-tools-version:5.9
+// swift-tools-version: 5.10
+
 import PackageDescription
 
 let package = Package(
   name: "AnyStore",
   platforms: [
-    .iOS(.v17),
-    .macOS(.v14),
-    .tvOS(.v17),
-    .watchOS(.v10)
+    .iOS(.v14),
+    .macOS(.v11)
   ],
   products: [
     .library(
