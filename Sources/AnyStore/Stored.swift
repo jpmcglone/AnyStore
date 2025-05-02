@@ -1,6 +1,5 @@
-import SwiftUI
-import Factory
 import AnyStore
+import SwiftUI
 
 @propertyWrapper
 @MainActor
