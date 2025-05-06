@@ -12,6 +12,19 @@ public final class AnyStore: ObservableObject {
 
   public init() {}
 
+  public func delete<T: Identifiable>(_ object: T) {
+    let key = makeKey(for: object.id)
+    let typeKey = ObjectIdentifier(T.self)
+
+    queue.sync(flags: .barrier) {
+      DispatchQueue.main.async {
+        self.storage.removeValue(forKey: key)
+        self.typeIndex[typeKey]?[key] = nil
+        print("🗑️ [AnyStore] Deleted object for key \(key) (\(T.self))")
+      }
+    }
+  }
+  
   // MARK: - Save for Mergeable types
   @discardableResult
   public func save<T: Identifiable & Mergeable>(_ object: T) -> T {
@@ -40,6 +53,16 @@ public final class AnyStore: ObservableObject {
     }
 
     return result
+  }
+
+  public func clear() {
+    queue.sync(flags: .barrier) {
+      DispatchQueue.main.async {
+        self.storage.removeAll()
+        self.typeIndex.removeAll()
+        print("🧹 [AnyStore] Store cleared")
+      }
+    }
   }
 
   // MARK: - Save for plain Identifiable types
