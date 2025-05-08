@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import SwiftUI
 
+@MainActor
 public final class AnyStore: ObservableObject {
   public static let shared = AnyStore()
 
@@ -72,12 +73,9 @@ public final class AnyStore: ObservableObject {
     let typeKey = ObjectIdentifier(T.self)
 
     queue.sync(flags: .barrier) {
-      let value = object
-      DispatchQueue.main.async {
-        self.storage[key] = value
-        self.typeIndex[typeKey, default: [:]][key] = value
-        print("🟢 [AnyStore] Overwrote object for key \(key) (\(T.self))")
-      }
+      self.storage[key] = object
+      self.typeIndex[typeKey, default: [:]][key] = object
+      print("🟢 [AnyStore] Overwrote object for key \(key) (\(T.self))")
     }
 
     return object
