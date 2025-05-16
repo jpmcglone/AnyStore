@@ -11,6 +11,15 @@ public final class AnyStore: ObservableObject {
 
   private let queue = DispatchQueue(label: "com.anystore.queue", attributes: .concurrent)
 
+  private var subjects: [String: PassthroughSubject<Void, Never>] = [:]
+
+  private func subject(for key: String) -> PassthroughSubject<Void, Never> {
+    if let s = subjects[key] { return s }
+    let s = PassthroughSubject<Void, Never>()
+    subjects[key] = s
+    return s
+  }
+
   public init() {}
 
   public func delete<T: Identifiable>(_ object: T) {
@@ -78,7 +87,34 @@ public final class AnyStore: ObservableObject {
       print("🟢 [AnyStore] Overwrote object for key \(key) (\(T.self))")
     }
 
+    subject(for: key).send()
     return object
+  }
+
+  @discardableResult
+  public func save<T: Identifiable & Equatable>(_ object: T) -> T {
+    let key = makeKey(for: object.id)
+    let typeKey = ObjectIdentifier(T.self)
+    var shouldSend = true
+
+    queue.sync(flags: .barrier) {
+      if let existing = storage[key] as? T, existing == object {
+        shouldSend = false // Value hasn't changed, skip notification
+      }
+      self.storage[key] = object
+      self.typeIndex[typeKey, default: [:]][key] = object
+      print("🟢 [AnyStore] Overwrote object for key \(key) (\(T.self))")
+    }
+
+    if shouldSend {
+      subject(for: key).send()
+    }
+    return object
+  }
+
+  public func publisher<ID: CustomStringConvertible>(for id: ID) -> AnyPublisher<Void, Never> {
+    let key = makeKey(for: id)
+    return subject(for: key).eraseToAnyPublisher()
   }
 
   // MARK: - Fetch
