@@ -6,11 +6,10 @@ import SwiftUI
 public final class AnyStore: ObservableObject {
   public static let shared = AnyStore()
 
-  @Published private var storage: [String: Any] = [:]
+  private var storage: [String: Any] = [:]
   private var typeIndex: [ObjectIdentifier: [String: Any]] = [:]
 
   private let queue = DispatchQueue(label: "com.anystore.queue", attributes: .concurrent)
-
   private var subjects: [String: PassthroughSubject<Void, Never>] = [:]
 
   private func subject(for key: String) -> PassthroughSubject<Void, Never> {
@@ -30,11 +29,11 @@ public final class AnyStore: ObservableObject {
       DispatchQueue.main.async {
         self.storage.removeValue(forKey: key)
         self.typeIndex[typeKey]?[key] = nil
-        print("🗑️ [AnyStore] Deleted object for key \(key) (\(T.self))")
+        print("🗑️ [AnyStore] Deleted <\(String(describing: T.self))> for key \(key)")
       }
     }
   }
-  
+
   // MARK: - Save for Mergeable types
   @discardableResult
   public func save<T: Identifiable & Mergeable>(_ object: T) -> T {
@@ -47,7 +46,7 @@ public final class AnyStore: ObservableObject {
         if let existingDate = existing.updatedAt,
            let newDate = object.updatedAt,
            existingDate > newDate {
-          print("🟡 [AnyStore] Skipped outdated update for \(key)")
+          print("🟡 [AnyStore] Skipped outdated update for <\(String(describing: T.self))> key \(key)")
           result = existing
         } else {
           result = existing.merged(with: object)
@@ -58,7 +57,7 @@ public final class AnyStore: ObservableObject {
       DispatchQueue.main.async {
         self.storage[key] = value
         self.typeIndex[typeKey, default: [:]][key] = value
-        print("🟢 [AnyStore] Saved object for key \(key) (\(T.self))")
+        print("🟢 [AnyStore] Saved <\(String(describing: T.self))> for key \(key)")
       }
     }
 
@@ -84,7 +83,7 @@ public final class AnyStore: ObservableObject {
     queue.sync(flags: .barrier) {
       self.storage[key] = object
       self.typeIndex[typeKey, default: [:]][key] = object
-      print("🟢 [AnyStore] Overwrote object for key \(key) (\(T.self))")
+      print("🟢 [AnyStore] Overwrote <\(String(describing: T.self))> for key \(key)")
     }
 
     subject(for: key).send()
@@ -103,7 +102,7 @@ public final class AnyStore: ObservableObject {
       }
       self.storage[key] = object
       self.typeIndex[typeKey, default: [:]][key] = object
-      print("🟢 [AnyStore] Overwrote object for key \(key) (\(T.self))")
+      print("🟢 [AnyStore] Overwrote <\(String(describing: T.self))> for key \(key)")
     }
 
     if shouldSend {
@@ -125,8 +124,8 @@ public final class AnyStore: ObservableObject {
       result = storage[key] as? T
     }
     print(result != nil
-          ? "🔍 [AnyStore] Fetched object for key \(key)"
-          : "🟥 [AnyStore] Failed to fetch object for key \(key)")
+          ? "🔍 [AnyStore] Fetched <\(String(describing: T.self))> for key \(key)"
+          : "🟥 [AnyStore] Failed to fetch <\(String(describing: T.self))> for key \(key)")
     return result
   }
 
@@ -149,7 +148,7 @@ public final class AnyStore: ObservableObject {
         results = map.values.compactMap { $0 as? T }
       }
     }
-    print("📋 [AnyStore] Returning all \(T.self)s (\(results.count) total)")
+    print("📋 [AnyStore] Returning all <\(String(describing: T.self))>s (\(results.count) total)")
     return results
   }
 
