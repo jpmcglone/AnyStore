@@ -34,6 +34,25 @@ public final class AnyStore: ObservableObject {
     }
   }
 
+  // MARK: - Bulk Delete
+
+  public func delete<T: Identifiable>(_ objects: [T]) {
+    guard !objects.isEmpty else { return }
+
+    let typeKey = ObjectIdentifier(T.self)
+
+    queue.sync(flags: .barrier) {
+      DispatchQueue.main.async {
+        for object in objects {
+          let key = self.makeKey(for: object.id)
+          self.storage.removeValue(forKey: key)
+          self.typeIndex[typeKey]?[key] = nil
+        }
+        print("🗑️📦 [AnyStore] Bulk deleted \(objects.count) <\(String(describing: T.self))> objects")
+      }
+    }
+  }
+
   public func clear() {
     queue.sync(flags: .barrier) {
       DispatchQueue.main.async {
@@ -60,21 +79,23 @@ public final class AnyStore: ObservableObject {
       }
 
       // --- MERGEABLE HANDLING (if existing object IS T) ---
-      if let mergeableNew = object as? any Mergeable,
-         let existing = storage[key] as? T,
-         let mergeableOld = existing as? any Mergeable,
-         type(of: mergeableNew) == type(of: mergeableOld)
+      if
+        let mergeableNew = object as? any Mergeable,
+        let existing = storage[key] as? T,
+        let mergeableOld = existing as? any Mergeable,
+        type(of: mergeableNew) == type(of: mergeableOld)
       {
         if let merged = mergeableOld.mergedAny(with: mergeableNew) as? T {
           result = merged
         }
       }
       // --- EQUATABLE HANDLING ---
-      else if let equatableObject = object as? any Equatable,
-              let existing = storage[key] as? T,
-              let existingEquatable = existing as? any Equatable,
-              type(of: equatableObject) == type(of: existingEquatable),
-              equatableObject.isEqualTo(existingEquatable)
+      else if
+        let equatableObject = object as? any Equatable,
+        let existing = storage[key] as? T,
+        let existingEquatable = existing as? any Equatable,
+        type(of: equatableObject) == type(of: existingEquatable),
+        equatableObject.isEqualTo(existingEquatable)
       {
         result = existing
         shouldSend = false
@@ -91,12 +112,81 @@ public final class AnyStore: ObservableObject {
     return result
   }
 
-  public func publisher<ID: CustomStringConvertible>(for id: ID) -> AnyPublisher<Void, Never> {
+  // MARK: - Bulk Save
+
+  @discardableResult
+  public func save<T: Identifiable>(_ objects: [T]) -> [T] {
+    guard !objects.isEmpty else { return [] }
+
+    let typeKey = ObjectIdentifier(T.self)
+    var results: [T] = []
+    var keysToNotify: [String] = []
+
+    // Single barrier operation for all objects
+    queue.sync(flags: .barrier) {
+      for object in objects {
+        let key = makeKey(for: object.id)
+        var result: T = object
+        var shouldSend = true
+
+        // Check if the existing object is the *same* concrete type as T. If not, replace it.
+        if let existing = storage[key], !(existing is T) {
+          self.storage.removeValue(forKey: key)
+          self.typeIndex[typeKey]?[key] = nil
+          print("⚠️ [AnyStore] Type mismatch for key \(key): replacing \(type(of: existing)) with \(type(of: object))")
+        }
+
+        // --- MERGEABLE HANDLING (if existing object IS T) ---
+        if
+          let mergeableNew = object as? any Mergeable,
+          let existing = storage[key] as? T,
+          let mergeableOld = existing as? any Mergeable,
+          type(of: mergeableNew) == type(of: mergeableOld)
+        {
+          if let merged = mergeableOld.mergedAny(with: mergeableNew) as? T {
+            result = merged
+          }
+        }
+        // --- EQUATABLE HANDLING ---
+        else if
+          let equatableObject = object as? any Equatable,
+          let existing = storage[key] as? T,
+          let existingEquatable = existing as? any Equatable,
+          type(of: equatableObject) == type(of: existingEquatable),
+          equatableObject.isEqualTo(existingEquatable)
+        {
+          result = existing
+          shouldSend = false
+        }
+        // --- DEFAULT OVERWRITE ---
+        self.storage[key] = result
+        self.typeIndex[typeKey, default: [:]][key] = result
+
+        results.append(result)
+        if shouldSend {
+          keysToNotify.append(key)
+        }
+      }
+
+      // Single log entry for bulk operation
+      print("📦 [AnyStore] Bulk saved \(results.count) <\(String(describing: T.self))> objects")
+    }
+
+    // Send notifications for all changed objects
+    for key in keysToNotify {
+      subject(for: key).send()
+    }
+
+    return results
+  }
+
+  public func publisher(for id: some CustomStringConvertible) -> AnyPublisher<Void, Never> {
     let key = makeKey(for: id)
     return subject(for: key).eraseToAnyPublisher()
   }
 
   // MARK: - Fetch
+
   public func fetch<T: Identifiable>(_ id: T.ID) -> T? {
     let key = makeKey(for: id)
     var result: T?
@@ -104,12 +194,13 @@ public final class AnyStore: ObservableObject {
       result = storage[key] as? T
     }
     print(result != nil
-          ? "🔍 [AnyStore] Fetched <\(String(describing: T.self))> for key \(key)"
-          : "🟥 [AnyStore] Failed to fetch <\(String(describing: T.self))> for key \(key)")
+      ? "🔍 [AnyStore] Fetched <\(String(describing: T.self))> for key \(key)"
+      : "🟥 [AnyStore] Failed to fetch <\(String(describing: T.self))> for key \(key)")
     return result
   }
 
   // MARK: - Fetch or Insert
+
   @discardableResult
   public func fetchOrInsert<T: Identifiable>(_ object: T) -> T {
     if let existing: T = fetch(object.id) {
@@ -120,6 +211,7 @@ public final class AnyStore: ObservableObject {
   }
 
   // MARK: - Fetch All (O(1))
+
   public func all<T: Identifiable>(of type: T.Type = T.self) -> [T] {
     let typeKey = ObjectIdentifier(T.self)
     var results: [T] = []
@@ -133,7 +225,8 @@ public final class AnyStore: ObservableObject {
   }
 
   // MARK: - Helpers
-  private func makeKey<ID>(for id: ID) -> String {
+
+  private func makeKey(for id: some Any) -> String {
     "\(id)"
   }
 }
